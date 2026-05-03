@@ -1,0 +1,432 @@
+openapi: 3.0.3
+info:
+  title: Leaderboard & Event Simulation API
+  version: 1.0.0
+  description: |
+    API documentation for the Leaderboard module and simulated event actions.
+    - All endpoints require valid JWT authentication via the `Authorization: Bearer <token>` header.
+    - The backend handles atomic score mutations, deterministic tie-breaking, and automatic leaderboard rank updates.
+    - Validation rules are enforced at the API boundary before processing.
+  contact:
+    name: Backend Engineering Team
+    email: engineering@gamestudio.com
+servers:
+  - url: https://api.game-server.com/v1
+    description: Production
+  - url: http://localhost:3000/v1
+    description: Local Development
+
+security:
+  - BearerAuth: []
+
+paths:
+  /api/leader-board:
+    get:
+      summary: Retrieve Top Players Leaderboard
+      description: >
+        Fetches an ordered list of top players for a specific `ActionType`. 
+        Returns user details, avatar URL, base score, and 0-indexed rank (0 = 1st place).
+      tags:
+        - Leaderboard
+      parameters:
+        - name: type
+          in: query
+          required: true
+          description: >
+            Leaderboard scope. Accepts fixed enums (e.g., `TOTAL_SCORE`) or 
+            event-scoped strings (e.g., `WEEKLY_CHALLENGE:507f191e810c19729de860ea`).
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 64
+            pattern: ^[A-Z_]+(:[a-f0-9]{24})?$
+            example: TOTAL_SCORE
+        - name: limit
+          in: query
+          required: false
+          description: Number of top players to return.
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Successfully retrieved leaderboard entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaderboardEntry'
+              examples:
+                success:
+                  summary: Default limit (10) returned
+                  value:
+                    - rank: 0
+                      userId: "user_abc123"
+                      username: "DragonSlayer"
+                      avatar: "https://cdn.game.com/avatars/user_abc123.png"
+                      score: 2450
+                    - rank: 1
+                      userId: "user_def456"
+                      username: "NightHunter"
+                      avatar: "https://cdn.game.com/avatars/user_def456.png"
+                      score: 2300
+        '400':
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_limit:
+                  summary: Limit out of range
+                  value:
+                    code: "VALIDATION_ERROR"
+                    message: "limit must be between 1 and 100"
+                    details: ["limit: 150 exceeds maximum allowed value"]
+        '401':
+          description: Unauthorized - Missing or invalid JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                auth_failure:
+                  summary: Expired or malformed token
+                  value:
+                    code: "AUTH_ERROR"
+                    message: "Invalid or expired JWT token."
+        '500':
+          description: Internal server error.
+
+  /api/lucky-spin/{id}:
+    post:
+      summary: Execute Lucky Spin Event
+      description: >
+        Simulates a lucky spin for a specific event. Each successful spin increments the user's total spin count by 1. 
+        Automatically awards points/prizes and updates related leaderboards if applicable.
+      tags:
+        - Events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Event ID (MongoDB ObjectId format)
+          schema:
+            type: string
+            pattern: ^[a-f0-9]{24}$
+            example: 507f191e810c19729de860ea
+      responses:
+        '200':
+          description: Spin executed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuckyEventResponse'
+              examples:
+                success:
+                  summary: Spin successful
+                  value:
+                    eventId: "507f191e810c19729de860ea"
+                    userId: "user_abc123"
+                    actionType: "LUCKY_SPIN"
+                    totalCount: 15
+                    result:
+                      prize: "GOLD_COIN_x10"
+                      pointsAwarded: 50
+                      rankUpdated: true
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                auth_failure:
+                  summary: Missing Bearer token
+                  value:
+                    code: "AUTH_ERROR"
+                    message: "Authentication required. Provide a valid JWT."
+        '404':
+          description: Event not found or expired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                not_found:
+                  summary: Event ID does not exist
+                  value:
+                    code: "RESOURCE_NOT_FOUND"
+                    message: "Event 507f191e810c19729de860ea is not available."
+        '429':
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/lucky-draw/{id}:
+    post:
+      summary: Execute Lucky Draw Event
+      description: >
+        Simulates a lucky draw for a specific event. Each successful draw increments the user's total draw count by 1. 
+        Triggers prize distribution and auto-updates relevant leaderboards.
+      tags:
+        - Events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Event ID (MongoDB ObjectId format)
+          schema:
+            type: string
+            pattern: ^[a-f0-9]{24}$
+            example: 60b8d795f3c42a1b2c3d4e5f
+      responses:
+        '200':
+          description: Draw executed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LuckyEventResponse'
+              examples:
+                success:
+                  summary: Draw successful
+                  value:
+                    eventId: "60b8d795f3c42a1b2c3d4e5f"
+                    userId: "user_abc123"
+                    actionType: "LUCKY_DRAW"
+                    totalCount: 8
+                    result:
+                      prize: "RARE_ITEM_CHEST"
+                      pointsAwarded: 100
+                      rankUpdated: false
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                auth_failure:
+                  summary: Invalid JWT signature
+                  value:
+                    code: "AUTH_ERROR"
+                    message: "Token signature verification failed."
+        '400':
+          description: Validation error or draw limit reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                limit_reached:
+                  summary: Daily draw cap exceeded
+                  value:
+                    code: "BUSINESS_RULE_VIOLATION"
+                    message: "Maximum daily draws (10) reached for this event."
+
+  /api/any_action:
+    post:
+      summary: Generic Player Resource Action
+      description: >
+        Executes an arbitrary player resource change (e.g., quest completion, item purchase, PvP victory). 
+        On successful resource modification, the system automatically calculates and updates the player's position on relevant leaderboards.
+      tags:
+        - Core Actions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnyActionRequest'
+            examples:
+              standard_quest:
+                summary: Complete daily quest
+                value:
+                  actionType: "DAILY_QUEST"
+                  userId: "user_abc123"
+                  points: 75
+                  metadata:
+                    questId: "Q_042"
+                    difficulty: "HARD"
+              validation_fail:
+                summary: Invalid point type
+                value:
+                  actionType: "PVP_MATCH"
+                  userId: "user_abc123"
+                  points: 12.5
+                  metadata: {}
+      responses:
+        '200':
+          description: Resource updated and leaderboard synced.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  actionId:
+                    type: string
+                    format: uuid
+                  updatedScore:
+                    type: integer
+                  newRank:
+                    type: integer
+                    nullable: true
+                  affectedLeaderboards:
+                    type: array
+                    items:
+                      type: string
+              examples:
+                success:
+                  summary: Points awarded & rank updated
+                  value:
+                    success: true
+                    actionId: "550e8400-e29b-41d4-a716-446655440000"
+                    updatedScore: 1575
+                    newRank: 3
+                    affectedLeaderboards: ["TOTAL_SCORE", "DAILY_QUEST:64f1a2b3c4d5e6f7a8b9c0d1"]
+        '400':
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                type_validation:
+                  summary: Points must be integer
+                  value:
+                    code: "VALIDATION_ERROR"
+                    message: "points must be an integer"
+                    details: ["points: 12.5 is not an integer"]
+        '401':
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                auth_failure:
+                  summary: Token expired
+                  value:
+                    code: "AUTH_ERROR"
+                    message: "JWT token has expired. Please refresh."
+        '409':
+          description: Concurrent modification conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Enter JWT Bearer token. Format: `Bearer <your_token>`"
+
+  schemas:
+    LeaderboardEntry:
+      type: object
+      required:
+        - rank
+        - userId
+        - username
+        - score
+      properties:
+        rank:
+          type: integer
+          minimum: 0
+          description: 0-indexed rank. 0 = 1st place, 1 = 2nd place.
+        userId:
+          type: string
+          description: Unique player identifier.
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+        avatar:
+          type: string
+          format: uri
+          nullable: true
+        score:
+          type: integer
+          minimum: 0
+          description: Base score displayed to the client (time-weighted decimals stripped internally).
+
+    LuckyEventResponse:
+      type: object
+      properties:
+        eventId:
+          type: string
+        userId:
+          type: string
+        actionType:
+          type: string
+          enum:
+            - LUCKY_SPIN
+            - LUCKY_DRAW
+        totalCount:
+          type: integer
+          minimum: 1
+          description: Total spins/draws performed by the user for this event.
+        result:
+          type: object
+          properties:
+            prize:
+              type: string
+            pointsAwarded:
+              type: integer
+            rankUpdated:
+              type: boolean
+              description: Indicates if leaderboard position changed due to this action.
+
+    AnyActionRequest:
+      type: object
+      required:
+        - actionType
+        - userId
+        - points
+      properties:
+        actionType:
+          type: string
+          minLength: 3
+          maxLength: 64
+          pattern: ^[A-Z_]+(:[a-f0-9]{24})?$
+          description: "Target leaderboard or event scope."
+        userId:
+          type: string
+          format: uuid
+          description: Player whose resource is being modified.
+        points:
+          type: integer
+          description: Absolute or delta points. Must be a whole number.
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Optional context payload for logging/analytics.
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_ERROR
+            - AUTH_ERROR
+            - RESOURCE_NOT_FOUND
+            - BUSINESS_RULE_VIOLATION
+            - INTERNAL_ERROR
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: string
+          nullable: true

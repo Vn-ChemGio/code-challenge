@@ -1,0 +1,34 @@
+services:
+  problem5_api_dev:
+    container_name: problem5_api_dev
+    image: problem5_api_dev:1.0.0
+    build:
+      context: .
+      target: development
+    ports:
+      - ${PORT}:${PORT}
+    depends_on:
+      - problem5_postgres # Đảm bảo PostgreSQL start trước khi chạy API
+    volumes:
+      - ./:/usr/src/app
+    command: npm run start:dev
+    restart: unless-stopped
+
+  problem5_postgres:
+    container_name: ${DATABASE_HOST}
+    image: postgres:latest
+    ports:
+      - "5432:5432" # Maps Host Port 5432 to Container Port 5432
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    expose:
+      - ${DATABASE_PORT}
+    volumes:
+      - ./postgres-data:/var/lib/postgresql # Lưu dữ liệu ra ngoài
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge
